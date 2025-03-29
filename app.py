@@ -12,22 +12,22 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///wallets.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
-# Use a more reliable RPC endpoint
-VIBESTATION_RPC_URL = 'https://api.mainnet-beta.solana.com'
+# Use Vibestation RPC endpoint
+VIBESTATION_RPC_URL = 'http://basic.swqos.solanavibestation.com/?api_key=a25cf1b7c66c7795925ed2486645a57f'
 # Backup RPC URLs if needed
-# VIBESTATION_RPC_URL = 'https://solana-api.projectserum.com'
+# VIBESTATION_RPC_URL = 'https://api.mainnet-beta.solana.com'
 # VIBESTATION_RPC_URL = 'https://rpc.ankr.com/solana'
 
 # Cache for balances
 balance_cache = {}
-balance_cache_timeout = 10  # seconds
+balance_cache_timeout = 5  # Reduced from 10 to 5 seconds for faster updates
 
 # Configure requests session with retries
 session = requests.Session()
-session.mount('https://', requests.adapters.HTTPAdapter(
-    max_retries=3,
-    pool_connections=10,
-    pool_maxsize=10
+session.mount('http://', requests.adapters.HTTPAdapter(
+    max_retries=2,  # Reduced retries for faster response
+    pool_connections=20,  # Increased for better performance
+    pool_maxsize=20
 ))
 
 class TrackedWallet(db.Model):
@@ -60,6 +60,19 @@ def init_db():
         db.create_all()
         print("Database initialized successfully")
 
+def validate_solana_address(address):
+    """Validate if a string is a valid Solana address."""
+    try:
+        # Check length (Solana addresses are 32-44 characters)
+        if not address or len(address) < 32 or len(address) > 44:
+            return False
+            
+        # Check if it contains only base58 characters
+        valid_chars = set('123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz')
+        return all(c in valid_chars for c in address)
+    except:
+        return False
+
 def get_wallet_balance(wallet_address):
     try:
         # Check cache first
@@ -70,7 +83,7 @@ def get_wallet_balance(wallet_address):
                 return cached_balance
 
         # Validate wallet address format
-        if not wallet_address or len(wallet_address) != 44:
+        if not validate_solana_address(wallet_address):
             raise Exception('Invalid Solana wallet address format')
 
         response = session.post(
@@ -85,7 +98,7 @@ def get_wallet_balance(wallet_address):
                 'Content-Type': 'application/json',
                 'Accept': 'application/json'
             },
-            timeout=10  # Increased timeout
+            timeout=5  # Reduced timeout for faster response
         )
         
         if not response.ok:
@@ -93,7 +106,10 @@ def get_wallet_balance(wallet_address):
 
         response_data = response.json()
         if 'error' in response_data:
-            raise Exception(f'RPC API error: {response_data["error"].get("message", "Unknown error")}')
+            error_msg = response_data['error'].get('message', 'Unknown error')
+            if 'Invalid account' in error_msg:
+                raise Exception('Invalid Solana wallet address')
+            raise Exception(f'RPC API error: {error_msg}')
             
         if not response_data.get('result'):
             raise Exception('Invalid response from RPC API')
@@ -104,13 +120,14 @@ def get_wallet_balance(wallet_address):
         balance_cache[wallet_address] = (balance, current_time)
         
         return balance
+                
     except Exception as e:
         print(f"Error fetching balance: {str(e)}")
         raise
 
 def get_wallet_transactions(wallet_address):
     try:
-        # Get recent signatures
+        # Get recent signatures with increased limit
         response = session.post(
             VIBESTATION_RPC_URL,
             json={
@@ -119,14 +136,14 @@ def get_wallet_transactions(wallet_address):
                 'method': 'getSignaturesForAddress',
                 'params': [
                     wallet_address,
-                    {'limit': 10}
+                    {'limit': 50}  # Increased from 10 to 50 transactions
                 ]
             },
             headers={
                 'Content-Type': 'application/json',
                 'Accept': 'application/json'
             },
-            timeout=10  # Increased timeout
+            timeout=10
         )
         
         if not response.ok:
@@ -144,7 +161,7 @@ def get_wallet_transactions(wallet_address):
             try:
                 # Reduced delay between requests
                 if i > 0:
-                    time.sleep(0.2)  # 200ms delay between requests
+                    time.sleep(0.1)  # Reduced delay to 100ms for faster loading
                 
                 tx_response = session.post(
                     VIBESTATION_RPC_URL,
@@ -164,7 +181,7 @@ def get_wallet_transactions(wallet_address):
                         'Content-Type': 'application/json',
                         'Accept': 'application/json'
                     },
-                    timeout=10  # Increased timeout
+                    timeout=10
                 )
                 
                 if not tx_response.ok:
@@ -226,21 +243,31 @@ def get_wallet_transactions(wallet_address):
 
 def update_wallet(wallet):
     try:
+        print(f"Updating wallet {wallet.address}...")
         balance = get_wallet_balance(wallet.address)
+        print(f"Got balance: {balance} SOL")
         wallet.last_balance = balance
         wallet.last_updated = datetime.utcnow()
         db.session.commit()
-        print(f"Updated wallet {wallet.address}: {balance} SOL")
+        print(f"Successfully updated wallet {wallet.address}: {balance} SOL")
     except Exception as e:
         print(f"Error updating wallet {wallet.address}: {str(e)}")
+        # Don't raise the exception, just log it
 
 def background_update_task():
+    print("Background update task started")
     while True:
-        with app.app_context():
-            active_wallets = TrackedWallet.query.filter_by(is_active=True).all()
-            for wallet in active_wallets:
-                update_wallet(wallet)
-        time.sleep(30)  # Update every 30 seconds
+        try:
+            with app.app_context():
+                active_wallets = TrackedWallet.query.filter_by(is_active=True).all()
+                print(f"Found {len(active_wallets)} active wallets to update")
+                for wallet in active_wallets:
+                    update_wallet(wallet)
+                    time.sleep(0.5)  # Reduced delay between wallet updates
+            time.sleep(15)  # Update every 15 seconds instead of 30
+        except Exception as e:
+            print(f"Error in background task: {str(e)}")
+            time.sleep(2)  # Reduced error retry delay
 
 # Initialize database and start background task
 init_db()
@@ -258,8 +285,8 @@ def index():
 def get_wallet_info(wallet_address):
     try:
         # Validate wallet address format
-        if not wallet_address or len(wallet_address) != 44:
-            return jsonify({'error': 'Invalid Solana wallet address format'}), 400
+        if not validate_solana_address(wallet_address):
+            return jsonify({'error': 'Invalid Solana wallet address format. Please enter a valid Solana address.'}), 400
 
         if request.method == 'POST':
             data = request.get_json()
@@ -270,6 +297,7 @@ def get_wallet_info(wallet_address):
             # Try to get initial balance to validate the wallet exists
             try:
                 initial_balance = get_wallet_balance(wallet_address)
+                print(f"Initial balance for {wallet_address}: {initial_balance} SOL")
             except Exception as e:
                 return jsonify({'error': f'Invalid wallet address: {str(e)}'}), 400
                 
@@ -277,24 +305,31 @@ def get_wallet_info(wallet_address):
                 address=wallet_address,
                 name=data.get('name'),
                 is_active=True,
-                notifications_enabled=data.get('notifications_enabled', False)
+                notifications_enabled=data.get('notifications_enabled', False),
+                last_balance=initial_balance,
+                last_updated=datetime.utcnow()
             )
             db.session.add(wallet)
             db.session.commit()
+            print(f"Added new wallet {wallet_address} with balance {initial_balance} SOL")
 
         try:
             balance = get_wallet_balance(wallet_address)
             transactions = get_wallet_transactions(wallet_address)
+            print(f"Fetched balance for {wallet_address}: {balance} SOL")
         except Exception as e:
+            print(f"Error fetching wallet data: {str(e)}")
             return jsonify({'error': f'Failed to fetch wallet data: {str(e)}'}), 500
         
         wallet = TrackedWallet.query.filter_by(address=wallet_address).first()
         if not wallet:
             return jsonify({'error': 'Wallet not found'}), 404
         
+        # Update the wallet's balance in the database
         wallet.last_balance = balance
         wallet.last_updated = datetime.utcnow()
         db.session.commit()
+        print(f"Updated wallet {wallet_address} balance to {balance} SOL")
         
         return jsonify({
             'balance': balance,
@@ -302,6 +337,7 @@ def get_wallet_info(wallet_address):
             'wallet': wallet.to_dict()
         })
     except Exception as e:
+        print(f"Error in get_wallet_info: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/wallets')
