@@ -1,0 +1,900 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solana Wallet Tracker</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <!-- Add notification sound -->
+    <audio id="notificationSound" preload="auto">
+        <source src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" type="audio/mpeg">
+    </audio>
+</head>
+<body class="min-h-screen bg-gray-50">
+    <nav class="bg-gradient-to-r from-blue-600 to-blue-800 shadow-lg">
+        <div class="max-w-7xl mx-auto px-4">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <i class="fas fa-wallet text-white text-2xl mr-3"></i>
+                    <h1 class="text-xl font-bold text-white">Solana Wallet Tracker</h1>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <div class="flex items-center space-x-2">
+                        <i class="fas fa-volume-up text-white"></i>
+                        <input
+                            type="range"
+                            id="volumeControl"
+                            min="0"
+                            max="100"
+                            value="50"
+                            class="w-24 h-2 bg-white rounded-lg appearance-none cursor-pointer"
+                        />
+                    </div>
+                    <button
+                        id="showTrackedWallets"
+                        class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-blue-700 bg-white hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 shadow-sm transition-colors duration-150"
+                    >
+                        <i class="fas fa-plus mr-2"></i>
+                        Add Wallet
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="flex h-[calc(100vh-4rem)]">
+        <!-- Sidebar -->
+        <div class="w-80 bg-white border-r border-gray-200 flex flex-col">
+            <div class="p-4 border-b border-gray-200 bg-gray-50">
+                <h2 class="text-lg font-medium text-gray-900 mb-4">Tracked Wallets</h2>
+                <div class="relative">
+                    <input
+                        type="text"
+                        id="walletSearch"
+                        class="block w-full rounded-md border-gray-300 pl-10 pr-3 py-2 text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        placeholder="Search wallets..."
+                    />
+                    <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <i class="fas fa-search text-gray-400"></i>
+                    </div>
+                </div>
+            </div>
+            <div class="overflow-y-auto flex-1">
+                <div id="walletList" class="divide-y divide-gray-200">
+                    <!-- Wallet list items will be inserted here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="flex-1 overflow-y-auto bg-gray-50 p-6">
+            <div id="expandedWallets" class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- Expanded wallet details will be shown here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Wallet Modal -->
+    <div id="addWalletModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden overflow-y-auto h-full w-full z-50">
+        <div class="relative top-20 mx-auto p-6 border w-96 shadow-xl rounded-lg bg-white">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-medium text-gray-900">Add New Wallet</h3>
+                <button id="closeModal" class="text-gray-400 hover:text-gray-500 transition-colors duration-150">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="walletForm" class="space-y-4">
+                <div>
+                    <label for="walletName" class="block text-sm font-medium text-gray-700">
+                        Wallet Name
+                    </label>
+                    <div class="mt-1">
+                        <input
+                            type="text"
+                            name="walletName"
+                            id="walletName"
+                            class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                            placeholder="Enter wallet name"
+                        />
+                    </div>
+                </div>
+                <div>
+                    <label for="wallet" class="block text-sm font-medium text-gray-700">
+                        Solana Wallet Address
+                    </label>
+                    <div class="mt-1">
+                        <input
+                            type="text"
+                            name="wallet"
+                            id="wallet"
+                            class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                            placeholder="Enter Solana wallet address"
+                        />
+                    </div>
+                </div>
+                <div class="flex items-center">
+                    <input
+                        type="checkbox"
+                        id="enableNotifications"
+                        class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                    />
+                    <label for="enableNotifications" class="ml-2 block text-sm text-gray-900">
+                        Enable notifications for this wallet
+                    </label>
+                </div>
+                <div id="error" class="text-red-500 text-sm hidden"></div>
+                <div class="flex justify-end">
+                    <button
+                        type="submit"
+                        class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 shadow-sm transition-colors duration-150"
+                    >
+                        <i class="fas fa-plus mr-2"></i>
+                        Track Wallet
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Notifications Container -->
+    <div id="notifications" class="fixed bottom-4 right-4 space-y-2 z-50">
+        <!-- Notifications will be inserted here -->
+    </div>
+
+    <script>
+        // Cache DOM elements
+        const walletForm = document.getElementById('walletForm');
+        const walletInput = document.getElementById('wallet');
+        const walletNameInput = document.getElementById('walletName');
+        const errorDiv = document.getElementById('error');
+        const walletList = document.getElementById('walletList');
+        const expandedWalletsContainer = document.getElementById('expandedWallets');
+        const addWalletModal = document.getElementById('addWalletModal');
+        const showTrackedWalletsButton = document.getElementById('showTrackedWallets');
+        const closeModalButton = document.getElementById('closeModal');
+        const notificationsContainer = document.getElementById('notifications');
+        const volumeControl = document.getElementById('volumeControl');
+        const notificationSound = document.getElementById('notificationSound');
+
+        // Load saved volume from localStorage
+        const savedVolume = localStorage.getItem('notificationVolume');
+        if (savedVolume !== null) {
+            volumeControl.value = savedVolume;
+            notificationSound.volume = savedVolume / 100;
+        }
+
+        // Update volume when slider changes
+        volumeControl.addEventListener('input', (e) => {
+            const volume = e.target.value;
+            notificationSound.volume = volume / 100;
+            localStorage.setItem('notificationVolume', volume);
+        });
+
+        // State management
+        const state = {
+            wallets: new Map(), // Store wallet data
+            updateIntervals: {},
+            lastTransactionSignatures: {},
+            expandedWallets: new Set(),
+            pendingUpdates: new Set(), // Track wallets with pending updates
+            isLoading: false, // Track loading state
+            lastUpdate: {}, // Cache last update time for each wallet
+            updateCooldown: 5000, // Minimum time between updates (5 seconds)
+        };
+
+        // Event Listeners
+        walletForm.addEventListener('submit', handleSubmit);
+        showTrackedWalletsButton.addEventListener('click', showAddWalletModal);
+        closeModalButton.addEventListener('click', hideAddWalletModal);
+
+        // Debounce function to limit update frequency
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+
+        function createWalletListItem(wallet, balance) {
+            const listItem = document.createElement('div');
+            listItem.id = `wallet-list-${wallet.address}`;
+            listItem.className = 'p-4 hover:bg-blue-50 cursor-pointer transition-colors duration-150';
+            listItem.onclick = () => expandWallet(wallet.address);
+            
+            listItem.innerHTML = `
+                <div class="flex justify-between items-start">
+                    <div class="min-w-0 flex-1">
+                        <div class="flex items-center space-x-2">
+                            <h3 class="text-sm font-medium text-gray-900 truncate">${wallet.name}</h3>
+                            <span class="flex-shrink-0 h-2 w-2 rounded-full ${wallet.is_active ? 'bg-green-400' : 'bg-gray-400'}"></span>
+                        </div>
+                        <p class="text-xs text-gray-500 font-mono truncate mt-1">${wallet.address}</p>
+                    </div>
+                    <div class="ml-2 flex-shrink-0">
+                        <p class="text-sm font-medium text-gray-900">${balance.toFixed(4)} SOL</p>
+                    </div>
+                </div>
+            `;
+            
+            return listItem;
+        }
+
+        function updateWalletListItem(wallet, balance) {
+            const listItem = document.getElementById(`wallet-list-${wallet.address}`);
+            if (listItem) {
+                listItem.innerHTML = `
+                    <div class="flex justify-between items-start">
+                        <div class="min-w-0 flex-1">
+                            <div class="flex items-center space-x-2">
+                                <h3 class="text-sm font-medium text-gray-900 truncate">${wallet.name}</h3>
+                                <span class="flex-shrink-0 h-2 w-2 rounded-full ${wallet.is_active ? 'bg-green-400' : 'bg-gray-400'}"></span>
+                            </div>
+                            <p class="text-xs text-gray-500 font-mono truncate mt-1">${wallet.address}</p>
+                        </div>
+                        <div class="ml-2 flex-shrink-0">
+                            <p class="text-sm font-medium text-gray-900">${balance.toFixed(4)} SOL</p>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        function expandWallet(address) {
+            if (!state.expandedWallets.has(address)) {
+                state.expandedWallets.add(address);
+                const wallet = state.wallets.get(address);
+                if (wallet && wallet.transactions) {  // Check if wallet data is complete
+                    renderExpandedWallet(wallet);
+                } else {
+                    // If wallet data isn't loaded yet, fetch it
+                    loadWalletDetails(address).then(() => {
+                        const updatedWallet = state.wallets.get(address);
+                        if (updatedWallet && updatedWallet.transactions) {
+                            renderExpandedWallet(updatedWallet);
+                        }
+                    });
+                }
+            }
+        }
+
+        function minimizeWallet(address) {
+            state.expandedWallets.delete(address);
+            const expandedSection = document.getElementById(`expanded-${address}`);
+            if (expandedSection) {
+                expandedSection.remove();
+            }
+        }
+
+        // Optimized update function with caching and cooldown
+        const debouncedUpdate = debounce(async (address) => {
+            if (!state.pendingUpdates.has(address)) {
+                const now = Date.now();
+                const lastUpdate = state.lastUpdate[address] || 0;
+                
+                // Skip update if within cooldown period
+                if (now - lastUpdate < state.updateCooldown) {
+                    return;
+                }
+
+                state.pendingUpdates.add(address);
+                try {
+                    const response = await fetch(`/api/wallet/${address}`);
+                    const data = await response.json();
+                    
+                    if (!data.error) {
+                        state.wallets.set(address, data);
+                        state.lastUpdate[address] = now;
+                        updateWalletListItem(data.wallet, data.balance);
+                        
+                        if (state.expandedWallets.has(address)) {
+                            renderExpandedWallet(data);
+                        }
+                        
+                        checkNewTransactions(address, data);
+                    }
+                } catch (error) {
+                    console.error('Error updating wallet info:', error);
+                } finally {
+                    state.pendingUpdates.delete(address);
+                }
+            }
+        }, 1000); // 1 second debounce
+
+        function checkNewTransactions(address, data) {
+            if (state.lastTransactionSignatures[address]) {
+                const newTransactions = data.transactions.filter(tx => 
+                    !state.lastTransactionSignatures[address].includes(tx.signature)
+                );
+                
+                if (newTransactions.length > 0) {
+                    state.lastTransactionSignatures[address] = data.transactions.map(tx => tx.signature);
+                    
+                    if (data.wallet.notifications_enabled) {
+                        newTransactions.forEach(tx => {
+                            showNotification(
+                                `${data.wallet.name}: ${tx.type === 'incoming' ? 'Received' : 'Sent'} ${tx.amount.toFixed(4)} SOL`,
+                                'success'
+                            );
+                        });
+                    }
+                }
+            } else {
+                state.lastTransactionSignatures[address] = data.transactions.map(tx => tx.signature);
+            }
+        }
+
+        function renderExpandedWallet(data) {
+            const existingExpanded = document.getElementById(`expanded-${data.wallet.address}`);
+            const expandedSection = existingExpanded || document.createElement('div');
+            
+            if (!existingExpanded) {
+                expandedSection.id = `expanded-${data.wallet.address}`;
+                expandedSection.className = 'bg-white shadow-lg rounded-lg overflow-hidden border border-gray-200 hover:shadow-xl transition-shadow duration-200';
+            }
+
+            const notificationsEnabled = data.wallet.notifications_enabled;
+            
+            expandedSection.innerHTML = `
+                <div class="p-6">
+                    <div class="flex justify-between items-start mb-4">
+                        <div class="min-w-0">
+                            <div class="flex items-center space-x-3">
+                                <h2 class="text-2xl font-bold text-gray-900 truncate">
+                                    <input
+                                        type="text"
+                                        value="${data.wallet.name}"
+                                        class="bg-transparent border-none focus:ring-0 p-0 text-2xl font-bold text-gray-900 truncate w-full"
+                                        onblur="renameWallet('${data.wallet.address}', this.value)"
+                                        onkeypress="if(event.key === 'Enter') { this.blur(); }"
+                                    />
+                                </h2>
+                                ${data.wallet.is_active ? '<span class="flex-shrink-0 h-3 w-3 rounded-full bg-green-400 ring-2 ring-green-100"></span>' : ''}
+                            </div>
+                            <p class="text-sm text-gray-500 font-mono mt-1">${data.wallet.address}</p>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <button
+                                onclick="event.stopPropagation(); toggleNotifications('${data.wallet.address}')"
+                                class="text-${notificationsEnabled ? 'blue' : 'gray'}-600 hover:text-${notificationsEnabled ? 'blue' : 'gray'}-800 p-2 rounded-full hover:bg-gray-100 transition-colors duration-150 relative group"
+                                title="${notificationsEnabled ? 'Disable notifications' : 'Enable notifications'}"
+                            >
+                                <i class="fas ${notificationsEnabled ? 'fa-bell' : 'fa-bell-slash'}"></i>
+                                <span class="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 text-xs font-medium text-white bg-gray-900 rounded-md opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap">
+                                    ${notificationsEnabled ? 'Disable notifications' : 'Enable notifications'}
+                                </span>
+                            </button>
+                            <button
+                                onclick="toggleTracking('${data.wallet.address}')"
+                                class="text-${data.wallet.is_active ? 'green' : 'gray'}-600 hover:text-${data.wallet.is_active ? 'green' : 'gray'}-800 p-2 rounded-full hover:bg-gray-100 transition-colors duration-150"
+                                title="${data.wallet.is_active ? 'Stop tracking' : 'Start tracking'}"
+                            >
+                                <i class="fas fa-bolt"></i>
+                            </button>
+                            <button
+                                onclick="minimizeWallet('${data.wallet.address}')"
+                                class="text-gray-600 hover:text-gray-800 p-2 rounded-full hover:bg-gray-100 transition-colors duration-150"
+                                title="Minimize"
+                            >
+                                <i class="fas fa-minus"></i>
+                            </button>
+                            <button
+                                onclick="deleteWallet('${data.wallet.address}')"
+                                class="text-red-600 hover:text-red-800 p-2 rounded-full hover:bg-gray-100 transition-colors duration-150"
+                                title="Delete wallet"
+                            >
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg p-6 mb-6 text-white">
+                        <div class="flex justify-between items-baseline">
+                            <h3 class="text-lg font-medium opacity-90">Current Balance</h3>
+                            <p class="text-3xl font-bold">${data.balance.toFixed(4)} SOL</p>
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-medium text-gray-900 mb-4">Recent Transactions</h3>
+                        <div class="space-y-3">
+                            ${data.transactions.map(tx => `
+                                <div class="bg-gray-50 rounded-lg p-4 border border-gray-200 hover:border-gray-300 transition-colors duration-150">
+                                    <div class="flex justify-between items-start">
+                                        <div class="min-w-0">
+                                            <div class="text-sm text-gray-900 font-medium">
+                                                ${tx.type === 'incoming' ? 'Received from' : 'Sent to'}
+                                            </div>
+                                            <div class="text-sm font-mono text-gray-500 truncate mt-1">
+                                                ${tx.type === 'incoming' ? tx.sender : tx.recipient}
+                                            </div>
+                                            <div class="text-xs text-gray-500 mt-1">
+                                                ${new Date(tx.timestamp).toLocaleString()}
+                                            </div>
+                                        </div>
+                                        <div class="ml-4 flex flex-col items-end">
+                                            <div class="text-sm font-medium ${tx.type === 'incoming' ? 'text-green-600' : 'text-red-600'}">
+                                                ${tx.type === 'incoming' ? '+' : '-'}${tx.amount.toFixed(4)} SOL
+                                            </div>
+                                            <a
+                                                href="https://solscan.io/tx/${tx.signature}"
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                class="text-xs text-blue-600 hover:text-blue-800 mt-1 flex items-center"
+                                            >
+                                                View on Solscan
+                                                <i class="fas fa-external-link-alt ml-1"></i>
+                                            </a>
+                                        </div>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            if (!existingExpanded) {
+                expandedWalletsContainer.appendChild(expandedSection);
+            }
+        }
+
+        // Optimized wallet loading with parallel requests
+        async function loadExistingWallets() {
+            if (state.isLoading) return;
+            state.isLoading = true;
+
+            try {
+                // Show loading state
+                walletList.innerHTML = `
+                    <div class="p-4 text-center text-gray-500">
+                        <i class="fas fa-spinner fa-spin mr-2"></i>
+                        Loading wallets...
+                    </div>
+                `;
+
+                // Get the list of wallets
+                const response = await fetch('/api/wallets');
+                const wallets = await response.json();
+                
+                // Clear loading state
+                walletList.innerHTML = '';
+                
+                // Create list items immediately with placeholder data
+                wallets.forEach(wallet => {
+                    const listItem = createWalletListItem(wallet, 0);
+                    walletList.appendChild(listItem);
+                });
+
+                // Load details in parallel with a limit of 3 concurrent requests
+                const batchSize = 3;
+                for (let i = 0; i < wallets.length; i += batchSize) {
+                    const batch = wallets.slice(i, i + batchSize);
+                    await Promise.all(batch.map(wallet => loadWalletDetails(wallet.address)));
+                }
+            } catch (error) {
+                console.error('Error loading existing wallets:', error);
+                walletList.innerHTML = `
+                    <div class="p-4 text-center text-red-500">
+                        <i class="fas fa-exclamation-circle mr-2"></i>
+                        Failed to load wallets. Please refresh the page.
+                    </div>
+                `;
+            } finally {
+                state.isLoading = false;
+            }
+        }
+
+        // Optimized wallet details loading with caching
+        async function loadWalletDetails(walletAddress) {
+            const now = Date.now();
+            const lastUpdate = state.lastUpdate[walletAddress] || 0;
+            
+            // Skip if within cooldown period
+            if (now - lastUpdate < state.updateCooldown) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/wallet/${walletAddress}`);
+                const data = await response.json();
+                
+                if (!data.error) {
+                    state.wallets.set(walletAddress, data);
+                    state.lastUpdate[walletAddress] = now;
+                    updateWalletListItem(data.wallet, data.balance);
+                    startAutoUpdate(walletAddress);
+                    return data;
+                }
+            } catch (error) {
+                console.error(`Error loading details for wallet ${walletAddress}:`, error);
+                updateWalletErrorState(walletAddress);
+            }
+        }
+
+        // Optimized wallet addition
+        async function handleSubmit(e) {
+            e.preventDefault();
+            const walletAddress = walletInput.value.trim();
+            const walletName = walletNameInput.value.trim();
+            const enableNotifications = document.getElementById('enableNotifications').checked;
+            
+            if (!walletAddress) {
+                errorDiv.textContent = 'Please enter a wallet address';
+                errorDiv.classList.remove('hidden');
+                return;
+            }
+            
+            // Show immediate feedback
+            const listItem = createWalletListItem({
+                address: walletAddress,
+                name: walletName || walletAddress.slice(0, 8) + '...',
+                is_active: true,
+                notifications_enabled: enableNotifications
+            }, 0);
+            walletList.appendChild(listItem);
+            
+            // Close modal immediately
+            walletForm.reset();
+            hideAddWalletModal();
+            
+            try {
+                const response = await fetch(`/api/wallet/${walletAddress}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        name: walletName,
+                        notifications_enabled: enableNotifications
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    if (response.status === 400 && data.error === 'Wallet already exists') {
+                        listItem.remove();
+                        showNotification('This wallet is already being tracked', 'error');
+                        return;
+                    }
+                    throw new Error(data.error || 'Failed to add wallet');
+                }
+                
+                // Update state and UI
+                state.wallets.set(walletAddress, data);
+                updateWalletListItem(data.wallet, data.balance);
+                showNotification('Wallet added successfully', 'success');
+                
+                // Start tracking
+                startTrackingWallet(walletAddress);
+                
+                // Wait a short moment before expanding to ensure data is loaded
+                setTimeout(() => {
+                    expandWallet(walletAddress);
+                }, 500);
+                
+            } catch (error) {
+                console.error('Error adding wallet:', error);
+                listItem.remove();
+                showNotification(error.message || 'Failed to add wallet', 'error');
+            }
+        }
+
+        // Helper function to update error state
+        function updateWalletErrorState(walletAddress) {
+            const listItem = document.getElementById(`wallet-list-${walletAddress}`);
+            if (listItem) {
+                listItem.innerHTML = `
+                    <div class="flex justify-between items-start">
+                        <div class="min-w-0 flex-1">
+                            <div class="flex items-center space-x-2">
+                                <h3 class="text-sm font-medium text-gray-900 truncate">${walletAddress.slice(0, 8)}...</h3>
+                                <span class="flex-shrink-0 h-2 w-2 rounded-full bg-red-400"></span>
+                            </div>
+                            <p class="text-xs text-red-500 mt-1">Failed to load details</p>
+                        </div>
+                        <div class="ml-2 flex-shrink-0">
+                            <p class="text-sm font-medium text-gray-900">-</p>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        async function toggleNotifications(walletAddress) {
+            try {
+                const wallet = state.wallets.get(walletAddress);
+                if (!wallet) return;
+
+                const response = await fetch(`/api/wallet/${walletAddress}/notifications`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        notifications_enabled: !wallet.wallet.notifications_enabled
+                    })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    wallet.wallet.notifications_enabled = !wallet.wallet.notifications_enabled;
+                    
+                    // Update the UI
+                    updateWalletListItem(wallet.wallet, wallet.balance);
+                    if (state.expandedWallets.has(walletAddress)) {
+                        renderExpandedWallet(wallet);
+                    }
+                    
+                    // Show notification
+                    showNotification(
+                        `Notifications ${wallet.wallet.notifications_enabled ? 'enabled' : 'disabled'} for ${wallet.wallet.name}`,
+                        wallet.wallet.notifications_enabled ? 'success' : 'info'
+                    );
+                    
+                    // Play a sound when enabling notifications
+                    if (wallet.wallet.notifications_enabled) {
+                        const notificationSound = document.getElementById('notificationSound');
+                        notificationSound.volume = volumeControl.value / 100;
+                        notificationSound.play().catch(error => console.log('Error playing sound:', error));
+                    }
+                } else {
+                    throw new Error('Failed to toggle notifications');
+                }
+            } catch (error) {
+                console.error('Error toggling notifications:', error);
+                showNotification('Failed to toggle notifications', 'error');
+            }
+        }
+
+        async function toggleTracking(walletAddress) {
+            try {
+                const response = await fetch(`/api/wallet/${walletAddress}/toggle`, {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    const wallet = state.wallets.get(walletAddress);
+                    if (wallet) {
+                        wallet.wallet.is_active = data.is_active;
+                        if (data.is_active) {
+                            startAutoUpdate(walletAddress);
+                        } else {
+                            stopAutoUpdate(walletAddress);
+                        }
+                        updateWalletListItem(wallet.wallet, wallet.balance);
+                        if (state.expandedWallets.has(walletAddress)) {
+                            renderExpandedWallet(wallet);
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Error toggling tracking:', error);
+                showNotification('Failed to toggle tracking', 'error');
+            }
+        }
+
+        async function renameWallet(walletAddress, newName) {
+            if (!newName || newName.trim() === '') return;
+            
+            try {
+                const response = await fetch(`/api/wallet/${walletAddress}/rename`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ name: newName })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    const wallet = state.wallets.get(walletAddress);
+                    if (wallet) {
+                        wallet.wallet.name = newName;
+                        updateWalletListItem(wallet.wallet, wallet.balance);
+                        if (state.expandedWallets.has(walletAddress)) {
+                            renderExpandedWallet(wallet);
+                        }
+                    }
+                    showNotification(`Wallet renamed to "${newName}"`, 'success');
+                } else {
+                    throw new Error('Failed to rename wallet');
+                }
+            } catch (error) {
+                console.error('Error renaming wallet:', error);
+                showNotification('Failed to rename wallet', 'error');
+                // Revert the name in the input field
+                const input = document.querySelector(`#expanded-${walletAddress} input[type="text"]`);
+                if (input) {
+                    const wallet = state.wallets.get(walletAddress);
+                    if (wallet) {
+                        input.value = wallet.wallet.name;
+                    }
+                }
+            }
+        }
+
+        async function deleteWallet(walletAddress) {
+            try {
+                const response = await fetch(`/api/wallet/${walletAddress}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    const listItem = document.getElementById(`wallet-list-${walletAddress}`);
+                    if (listItem) {
+                        listItem.remove();
+                    }
+                    
+                    minimizeWallet(walletAddress);
+                    stopAutoUpdate(walletAddress);
+                    state.wallets.delete(walletAddress);
+                    state.lastTransactionSignatures[walletAddress] = null;
+                    showNotification('Wallet deleted successfully', 'success');
+                }
+            } catch (error) {
+                console.error('Error deleting wallet:', error);
+                showNotification('Failed to delete wallet', 'error');
+            }
+        }
+
+        function showNotification(message, type = 'info') {
+            const notification = document.createElement('div');
+            notification.className = `bg-white shadow-lg rounded-lg p-4 max-w-sm ${type === 'success' ? 'border-l-4 border-green-500' : type === 'error' ? 'border-l-4 border-red-500' : 'border-l-4 border-blue-500'} transform transition-all duration-300 opacity-0 translate-x-8`;
+            notification.innerHTML = `
+                <div class="flex items-start">
+                    <div class="flex-shrink-0">
+                        <i class="fas ${type === 'success' ? 'fa-check-circle text-green-500' : type === 'error' ? 'fa-exclamation-circle text-red-500' : 'fa-info-circle text-blue-500'}"></i>
+                    </div>
+                    <div class="ml-3">
+                        <p class="text-sm text-gray-900">${message}</p>
+                    </div>
+                </div>
+            `;
+            
+            notificationsContainer.appendChild(notification);
+            
+            // Play sound for transaction notifications or when enabling notifications
+            if ((type === 'success' && (message.includes('Received') || message.includes('Sent'))) || message.includes('enabled')) {
+                const notificationSound = document.getElementById('notificationSound');
+                notificationSound.volume = volumeControl.value / 100;
+                notificationSound.play().catch(error => console.log('Error playing sound:', error));
+            }
+            
+            // Animate in
+            requestAnimationFrame(() => {
+                notification.classList.remove('opacity-0', 'translate-x-8');
+            });
+            
+            // Animate out and remove
+            setTimeout(() => {
+                notification.classList.add('opacity-0', 'translate-x-8');
+                setTimeout(() => {
+                    notification.remove();
+                }, 300);
+            }, 4700);
+        }
+
+        function startAutoUpdate(walletAddress) {
+            if (state.updateIntervals[walletAddress]) {
+                clearInterval(state.updateIntervals[walletAddress]);
+            }
+            state.updateIntervals[walletAddress] = setInterval(() => debouncedUpdate(walletAddress), 30000);
+        }
+
+        function stopAutoUpdate(walletAddress) {
+            if (state.updateIntervals[walletAddress]) {
+                clearInterval(state.updateIntervals[walletAddress]);
+                delete state.updateIntervals[walletAddress];
+            }
+        }
+
+        function showAddWalletModal() {
+            addWalletModal.classList.remove('hidden');
+        }
+
+        function hideAddWalletModal() {
+            addWalletModal.classList.add('hidden');
+        }
+
+        function showError(message) {
+            errorDiv.textContent = message;
+            errorDiv.classList.remove('hidden');
+        }
+
+        function showLoading() {
+            errorDiv.classList.add('hidden');
+        }
+
+        function startTrackingWallet(walletAddress) {
+            // Start auto-updating the wallet
+            startAutoUpdate(walletAddress);
+            
+            // Expand the wallet details
+            expandWallet(walletAddress);
+        }
+
+        // Load existing wallets on page load
+        loadExistingWallets();
+
+        // Add search functionality
+        const walletSearch = document.getElementById('walletSearch');
+        walletSearch.addEventListener('input', (e) => {
+            const searchTerm = e.target.value.toLowerCase();
+            const walletItems = walletList.children;
+            
+            Array.from(walletItems).forEach(item => {
+                const wallet = state.wallets.get(item.id.replace('wallet-list-', ''));
+                if (wallet) {
+                    const matchesName = wallet.wallet.name.toLowerCase().includes(searchTerm);
+                    const matchesAddress = wallet.wallet.address.toLowerCase().includes(searchTerm);
+                    
+                    if (matchesName || matchesAddress) {
+                        item.classList.remove('hidden');
+                    } else {
+                        item.classList.add('hidden');
+                    }
+                }
+            });
+        });
+
+        function updateWalletInfo(walletAddress) {
+            fetch(`/api/wallet/${walletAddress}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        console.error('Error:', data.error);
+                        return;
+                    }
+
+                    const wallet = data.wallet;
+                    const details = document.querySelector(`#wallet-${walletAddress} .wallet-details`);
+                    if (!details) return;
+
+                    // Update balance
+                    const balanceElement = details.querySelector('.balance');
+                    if (balanceElement) {
+                        balanceElement.textContent = `${data.balance.toFixed(4)} SOL`;
+                    }
+
+                    // Update transactions
+                    const transactionsList = details.querySelector('.transactions-list');
+                    if (transactionsList) {
+                        let transactionsHtml = '';
+                        if (data.transactions && data.transactions.length > 0) {
+                            transactionsHtml = data.transactions
+                                .map(tx => `
+                                    <div class="transaction-item ${tx.type}">
+                                        <div class="transaction-icon">
+                                            <i class="fas fa-${tx.type === 'incoming' ? 'arrow-down' : 'arrow-up'}"></i>
+                                        </div>
+                                        <div class="transaction-info">
+                                            <div class="transaction-amount">${tx.type === 'incoming' ? '+' : '-'}${tx.amount.toFixed(4)} SOL</div>
+                                            <div class="transaction-addresses">
+                                                <div class="transaction-address">
+                                                    <span class="label">${tx.type === 'incoming' ? 'From' : 'To'}:</span>
+                                                    <span class="value">${tx.type === 'incoming' ? tx.sender : tx.recipient}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                `).join('');
+                        } else {
+                            transactionsHtml = '<div class="no-transactions">No recent transactions</div>';
+                        }
+
+                        transactionsList.innerHTML = transactionsHtml;
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                });
+        }
+    </script>
+</body>
+</html> 
