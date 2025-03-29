@@ -1,5 +1,6 @@
 from flask import Flask, render_template, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
+from flask_socketio import SocketIO, emit
 import requests
 import json
 from datetime import datetime
@@ -11,6 +12,7 @@ app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///wallets.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Use Vibestation RPC endpoint
 VIBESTATION_RPC_URL = 'http://basic.swqos.solanavibestation.com/?api_key=a25cf1b7c66c7795925ed2486645a57f'
@@ -20,7 +22,7 @@ VIBESTATION_RPC_URL = 'http://basic.swqos.solanavibestation.com/?api_key=a25cf1b
 
 # Cache for balances
 balance_cache = {}
-balance_cache_timeout = 5  # Reduced from 10 to 5 seconds for faster updates
+balance_cache_timeout = 3  # Reduced to 3 seconds for faster updates
 
 # Configure requests session with retries
 session = requests.Session()
@@ -241,6 +243,10 @@ def get_wallet_transactions(wallet_address):
     except Exception as e:
         return []
 
+def broadcast_wallet_update(wallet_data):
+    """Broadcast wallet updates to all connected clients"""
+    socketio.emit('wallet_update', wallet_data)
+
 def update_wallet(wallet):
     try:
         print(f"Updating wallet {wallet.address}...")
@@ -250,9 +256,12 @@ def update_wallet(wallet):
         wallet.last_updated = datetime.utcnow()
         db.session.commit()
         print(f"Successfully updated wallet {wallet.address}: {balance} SOL")
+        
+        # Broadcast the update to all connected clients
+        broadcast_wallet_update(wallet.to_dict())
+        
     except Exception as e:
         print(f"Error updating wallet {wallet.address}: {str(e)}")
-        # Don't raise the exception, just log it
 
 def background_update_task():
     print("Background update task started")
@@ -263,11 +272,11 @@ def background_update_task():
                 print(f"Found {len(active_wallets)} active wallets to update")
                 for wallet in active_wallets:
                     update_wallet(wallet)
-                    time.sleep(0.5)  # Reduced delay between wallet updates
-            time.sleep(15)  # Update every 15 seconds instead of 30
+                    time.sleep(0.2)  # Reduced delay between wallet updates
+            time.sleep(10)  # Update every 10 seconds
         except Exception as e:
             print(f"Error in background task: {str(e)}")
-            time.sleep(2)  # Reduced error retry delay
+            time.sleep(1)  # Reduced error retry delay
 
 # Initialize database and start background task
 init_db()
@@ -284,7 +293,6 @@ def index():
 @app.route('/api/wallet/<wallet_address>', methods=['GET', 'POST'])
 def get_wallet_info(wallet_address):
     try:
-        # Validate wallet address format
         if not validate_solana_address(wallet_address):
             return jsonify({'error': 'Invalid Solana wallet address format. Please enter a valid Solana address.'}), 400
 
@@ -294,7 +302,6 @@ def get_wallet_info(wallet_address):
             if wallet:
                 return jsonify({'error': 'Wallet already exists'}), 400
                 
-            # Try to get initial balance to validate the wallet exists
             try:
                 initial_balance = get_wallet_balance(wallet_address)
                 print(f"Initial balance for {wallet_address}: {initial_balance} SOL")
@@ -312,6 +319,9 @@ def get_wallet_info(wallet_address):
             db.session.add(wallet)
             db.session.commit()
             print(f"Added new wallet {wallet_address} with balance {initial_balance} SOL")
+            
+            # Broadcast the new wallet to all connected clients
+            broadcast_wallet_update(wallet.to_dict())
 
         try:
             balance = get_wallet_balance(wallet_address)
@@ -325,7 +335,6 @@ def get_wallet_info(wallet_address):
         if not wallet:
             return jsonify({'error': 'Wallet not found'}), 404
         
-        # Update the wallet's balance in the database
         wallet.last_balance = balance
         wallet.last_updated = datetime.utcnow()
         db.session.commit()
@@ -351,6 +360,8 @@ def delete_wallet(wallet_address):
     if wallet:
         wallet.is_active = False
         db.session.commit()
+        # Broadcast the deletion to all connected clients
+        broadcast_wallet_update({'address': wallet_address, 'is_active': False})
         return jsonify({'message': 'Wallet deleted successfully'})
     return jsonify({'error': 'Wallet not found'}), 404
 
@@ -409,4 +420,4 @@ if __name__ == '__main__':
         init_db()
     # Get port from environment variable or use 5000 as default
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    socketio.run(app, host='0.0.0.0', port=port, debug=True)
