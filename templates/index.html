@@ -142,7 +142,87 @@
         <!-- Notifications will be inserted here -->
     </div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <script>
+        // Initialize Socket.IO connection
+        const socket = io();
+        
+        // Handle real-time wallet updates
+        socket.on('wallet_update', (walletData) => {
+            console.log('Received wallet update:', walletData);
+            
+            // If it's a deletion
+            if (!walletData.is_active) {
+                const walletCard = document.querySelector(`[data-wallet="${walletData.address}"]`);
+                if (walletCard) {
+                    walletCard.remove();
+                }
+                return;
+            }
+            
+            // Check if wallet already exists
+            const existingWallet = document.querySelector(`[data-wallet="${walletData.address}"]`);
+            if (existingWallet) {
+                // Update existing wallet
+                updateWalletCard(walletData);
+            } else {
+                // Add new wallet
+                addWalletCard(walletData);
+            }
+        });
+
+        // Update the polling interval to be more frequent
+        setInterval(updateWallets, 3000); // Poll every 3 seconds as backup
+
+        function updateWalletCard(walletData) {
+            const walletCard = document.querySelector(`[data-wallet="${walletData.address}"]`);
+            if (!walletCard) return;
+
+            // Update balance
+            const balanceElement = walletCard.querySelector('.wallet-balance');
+            if (balanceElement) {
+                balanceElement.textContent = `${walletData.last_balance.toFixed(4)} SOL`;
+            }
+
+            // Update last updated time
+            const timeElement = walletCard.querySelector('.wallet-time');
+            if (timeElement) {
+                timeElement.textContent = `Last updated: ${new Date(walletData.last_updated).toLocaleString()}`;
+            }
+
+            // Update notification status
+            const notificationButton = walletCard.querySelector('.notification-button');
+            if (notificationButton) {
+                notificationButton.classList.toggle('active', walletData.notifications_enabled);
+                notificationButton.querySelector('i').className = walletData.notifications_enabled ? 'fas fa-bell' : 'far fa-bell';
+            }
+        }
+
+        function addWalletCard(walletData) {
+            const walletList = document.getElementById('walletList');
+            const walletCard = document.createElement('div');
+            walletCard.className = 'wallet-card';
+            walletCard.setAttribute('data-wallet', walletData.address);
+            
+            walletCard.innerHTML = `
+                <div class="wallet-header">
+                    <h3>${walletData.name || walletData.address.slice(0, 8) + '...'}</h3>
+                    <div class="wallet-actions">
+                        <button class="notification-button ${walletData.notifications_enabled ? 'active' : ''}" onclick="toggleNotifications('${walletData.address}')">
+                            <i class="${walletData.notifications_enabled ? 'fas' : 'far'} fa-bell"></i>
+                        </button>
+                        <button class="delete-button" onclick="deleteWallet('${walletData.address}')">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="wallet-balance">${walletData.last_balance.toFixed(4)} SOL</div>
+                <div class="wallet-time">Last updated: ${new Date(walletData.last_updated).toLocaleString()}</div>
+            `;
+            
+            walletList.appendChild(walletCard);
+        }
+
         // Cache DOM elements
         const walletForm = document.getElementById('walletForm');
         const walletInput = document.getElementById('wallet');
