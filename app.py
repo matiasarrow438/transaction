@@ -7,30 +7,38 @@ from datetime import datetime
 import threading
 import time
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///wallets.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SECRET_KEY'] = 'your-secret-key'  # Required for Flask-SocketIO
 db = SQLAlchemy(app)
-socketio = SocketIO(app, cors_allowed_origins="*")
 
-# Use Vibestation RPC endpoint
-VIBESTATION_RPC_URL = 'http://basic.swqos.solanavibestation.com/?api_key=a25cf1b7c66c7795925ed2486645a57f'
-# Backup RPC URLs if needed
-# VIBESTATION_RPC_URL = 'https://api.mainnet-beta.solana.com'
-# VIBESTATION_RPC_URL = 'https://rpc.ankr.com/solana'
+# Initialize SocketIO
+socketio = SocketIO(app)
 
-# Cache for balances
+# Use Vibestation RPC endpoint with fallbacks
+RPC_ENDPOINTS = [
+    'http://basic.swqos.solanavibestation.com/?api_key=a25cf1b7c66c7795925ed2486645a57f',
+    'https://api.mainnet-beta.solana.com',
+    'https://rpc.ankr.com/solana'
+]
+
+# Cache for balances with shorter timeout
 balance_cache = {}
-balance_cache_timeout = 3  # Reduced to 3 seconds for faster updates
+balance_cache_timeout = 0.5  # Reduced to 500ms for faster updates
 
-# Configure requests session with retries
+# Configure requests session with optimized settings
 session = requests.Session()
 session.mount('http://', requests.adapters.HTTPAdapter(
-    max_retries=2,  # Reduced retries for faster response
-    pool_connections=20,  # Increased for better performance
-    pool_maxsize=20
+    max_retries=0,  # No retries for faster response
+    pool_connections=100,  # Increased for better performance
+    pool_maxsize=100
 ))
+
+# Thread pool for parallel processing
+executor = ThreadPoolExecutor(max_workers=20)
 
 class TrackedWallet(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -88,50 +96,48 @@ def get_wallet_balance(wallet_address):
         if not validate_solana_address(wallet_address):
             raise Exception('Invalid Solana wallet address format')
 
-        response = session.post(
-            VIBESTATION_RPC_URL,
-            json={
-                'jsonrpc': '2.0',
-                'id': 1,
-                'method': 'getBalance',
-                'params': [wallet_address]
-            },
-            headers={
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            },
-            timeout=5  # Reduced timeout for faster response
-        )
-        
-        if not response.ok:
-            raise Exception(f'RPC API error: {response.status_code}')
+        # Try each RPC endpoint until one works
+        for endpoint in RPC_ENDPOINTS:
+            try:
+                response = session.post(
+                    endpoint,
+                    json={
+                        'jsonrpc': '2.0',
+                        'id': 1,
+                        'method': 'getBalance',
+                        'params': [wallet_address]
+                    },
+                    headers={
+                        'Content-Type': 'application/json',
+                    },
+                    timeout=1  # Reduced timeout for faster response
+                )
+                
+                if response.ok:
+                    response_data = response.json()
+                    if 'result' in response_data:
+                        balance = response_data['result']['value'] / 1e9
+                        balance_cache[wallet_address] = (balance, current_time)
+                        return balance
+            except:
+                continue
 
-        response_data = response.json()
-        if 'error' in response_data:
-            error_msg = response_data['error'].get('message', 'Unknown error')
-            if 'Invalid account' in error_msg:
-                raise Exception('Invalid Solana wallet address')
-            raise Exception(f'RPC API error: {error_msg}')
-            
-        if not response_data.get('result'):
-            raise Exception('Invalid response from RPC API')
-            
-        balance = response_data['result']['value'] / 1e9  # Convert lamports to SOL
-        
-        # Update cache
-        balance_cache[wallet_address] = (balance, current_time)
-        
-        return balance
+        # If all endpoints fail, return cached balance if available
+        if wallet_address in balance_cache:
+            return balance_cache[wallet_address][0]
+        raise Exception('Failed to fetch balance from all RPC endpoints')
                 
     except Exception as e:
         print(f"Error fetching balance: {str(e)}")
+        if wallet_address in balance_cache:
+            return balance_cache[wallet_address][0]
         raise
 
 def get_wallet_transactions(wallet_address):
     try:
         # Get recent signatures with increased limit
         response = session.post(
-            VIBESTATION_RPC_URL,
+            RPC_ENDPOINTS[0],
             json={
                 'jsonrpc': '2.0',
                 'id': 1,
@@ -166,7 +172,7 @@ def get_wallet_transactions(wallet_address):
                     time.sleep(0.1)  # Reduced delay to 100ms for faster loading
                 
                 tx_response = session.post(
-                    VIBESTATION_RPC_URL,
+                    RPC_ENDPOINTS[0],
                     json={
                         'jsonrpc': '2.0',
                         'id': 1,
@@ -243,44 +249,102 @@ def get_wallet_transactions(wallet_address):
     except Exception as e:
         return []
 
+# Socket.IO event handlers
+@socketio.on('connect')
+def handle_connect():
+    print('Client connected')
+    # Send current wallets to the new client
+    try:
+        with app.app_context():
+            wallets = TrackedWallet.query.filter_by(is_active=True).all()
+            for wallet in wallets:
+                try:
+                    balance = get_wallet_balance(wallet.address)
+                    wallet_data = wallet.to_dict()
+                    wallet_data.update({
+                        'balance': balance,
+                        'type': 'initial_load'
+                    })
+                    emit('wallet_update', wallet_data)
+                except Exception as e:
+                    print(f"Error sending wallet {wallet.address} to new client: {str(e)}")
+    except Exception as e:
+        print(f"Error in handle_connect: {str(e)}")
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    print('Client disconnected')
+
 def broadcast_wallet_update(wallet_data):
     """Broadcast wallet updates to all connected clients"""
-    socketio.emit('wallet_update', wallet_data)
+    try:
+        print(f"Broadcasting update: {wallet_data}")
+        # Add timestamp to track update order
+        wallet_data['timestamp'] = int(time.time() * 1000)
+        
+        # Force a type if none is provided
+        if 'type' not in wallet_data:
+            wallet_data['type'] = 'balance_update'
+            
+        # Broadcast to all clients including sender
+        socketio.emit('wallet_update', wallet_data, broadcast=True)
+        print(f"Broadcast complete for {wallet_data.get('address')}")
+            
+    except Exception as e:
+        print(f"Error broadcasting update: {str(e)}")
 
 def update_wallet(wallet):
     try:
-        print(f"Updating wallet {wallet.address}...")
         balance = get_wallet_balance(wallet.address)
-        print(f"Got balance: {balance} SOL")
-        wallet.last_balance = balance
-        wallet.last_updated = datetime.utcnow()
-        db.session.commit()
-        print(f"Successfully updated wallet {wallet.address}: {balance} SOL")
-        
-        # Broadcast the update to all connected clients
-        broadcast_wallet_update(wallet.to_dict())
-        
+        if balance != wallet.last_balance:
+            wallet.last_balance = balance
+            wallet.last_updated = datetime.utcnow()
+            db.session.commit()
+            # Only broadcast if balance changed
+            broadcast_wallet_update(wallet.to_dict())
     except Exception as e:
         print(f"Error updating wallet {wallet.address}: {str(e)}")
 
-def background_update_task():
-    print("Background update task started")
+def update_wallet_balances():
+    """Update all active wallet balances in parallel"""
     while True:
         try:
             with app.app_context():
                 active_wallets = TrackedWallet.query.filter_by(is_active=True).all()
-                print(f"Found {len(active_wallets)} active wallets to update")
-                for wallet in active_wallets:
-                    update_wallet(wallet)
-                    time.sleep(0.2)  # Reduced delay between wallet updates
-            time.sleep(10)  # Update every 10 seconds
+                if not active_wallets:
+                    time.sleep(1)
+                    continue
+
+                def update_wallet(wallet):
+                    try:
+                        balance = get_wallet_balance(wallet.address)
+                        if balance != wallet.last_balance:
+                            wallet.last_balance = balance
+                            wallet.last_updated = datetime.utcnow()
+                            db.session.commit()
+                            
+                            # Broadcast the update
+                            wallet_data = wallet.to_dict()
+                            wallet_data.update({
+                                'balance': balance,
+                                'type': 'balance_update'
+                            })
+                            broadcast_wallet_update(wallet_data)
+                            print(f"Updated and broadcast balance for {wallet.address}: {balance} SOL")
+                    except Exception as e:
+                        print(f"Error updating wallet {wallet.address}: {str(e)}")
+
+                # Update all wallets in parallel
+                list(executor.map(update_wallet, active_wallets))
+                
         except Exception as e:
-            print(f"Error in background task: {str(e)}")
-            time.sleep(1)  # Reduced error retry delay
+            print(f"Error in update thread: {str(e)}")
+        
+        time.sleep(0.5)  # Check for updates every 500ms
 
 # Initialize database and start background task
 init_db()
-update_thread = threading.Thread(target=background_update_task, daemon=True)
+update_thread = threading.Thread(target=update_wallet_balances, daemon=True)
 update_thread.start()
 
 with app.app_context():
@@ -320,9 +384,25 @@ def get_wallet_info(wallet_address):
             db.session.commit()
             print(f"Added new wallet {wallet_address} with balance {initial_balance} SOL")
             
-            # Broadcast the new wallet to all connected clients
-            broadcast_wallet_update(wallet.to_dict())
+            # Get transactions for the new wallet
+            transactions = get_wallet_transactions(wallet_address)
+            
+            # Broadcast the new wallet with full data to all connected clients
+            wallet_data = wallet.to_dict()
+            wallet_data.update({
+                'balance': initial_balance,
+                'transactions': transactions,
+                'type': 'new_wallet'  # Indicate this is a new wallet
+            })
+            broadcast_wallet_update(wallet_data)
+            
+            return jsonify({
+                'balance': initial_balance,
+                'transactions': transactions,
+                'wallet': wallet.to_dict()
+            })
 
+        # GET request handling
         try:
             balance = get_wallet_balance(wallet_address)
             transactions = get_wallet_transactions(wallet_address)
@@ -335,10 +415,19 @@ def get_wallet_info(wallet_address):
         if not wallet:
             return jsonify({'error': 'Wallet not found'}), 404
         
-        wallet.last_balance = balance
-        wallet.last_updated = datetime.utcnow()
-        db.session.commit()
-        print(f"Updated wallet {wallet_address} balance to {balance} SOL")
+        if balance != wallet.last_balance:
+            wallet.last_balance = balance
+            wallet.last_updated = datetime.utcnow()
+            db.session.commit()
+            print(f"Updated wallet {wallet_address} balance to {balance} SOL")
+            
+            # Broadcast balance update
+            wallet_data = wallet.to_dict()
+            wallet_data.update({
+                'balance': balance,
+                'type': 'balance_update'
+            })
+            broadcast_wallet_update(wallet_data)
         
         return jsonify({
             'balance': balance,
@@ -358,10 +447,12 @@ def get_tracked_wallets():
 def delete_wallet(wallet_address):
     wallet = TrackedWallet.query.filter_by(address=wallet_address).first()
     if wallet:
-        wallet.is_active = False
+        wallet_data = wallet.to_dict()
+        wallet_data['type'] = 'delete'
+        db.session.delete(wallet)
         db.session.commit()
-        # Broadcast the deletion to all connected clients
-        broadcast_wallet_update({'address': wallet_address, 'is_active': False})
+        # Broadcast the deletion immediately
+        broadcast_wallet_update(wallet_data)
         return jsonify({'message': 'Wallet deleted successfully'})
     return jsonify({'error': 'Wallet not found'}), 404
 
@@ -371,6 +462,10 @@ def toggle_wallet(wallet_address):
     if wallet:
         wallet.is_active = not wallet.is_active
         db.session.commit()
+        # Broadcast the toggle update
+        wallet_data = wallet.to_dict()
+        wallet_data['type'] = 'toggle'
+        broadcast_wallet_update(wallet_data)
         return jsonify({'message': 'Wallet status updated successfully', 'is_active': wallet.is_active})
     return jsonify({'error': 'Wallet not found'}), 404
 
@@ -384,6 +479,11 @@ def toggle_notifications(wallet_address):
         data = request.get_json()
         wallet.notifications_enabled = data.get('notifications_enabled', False)
         db.session.commit()
+        
+        # Broadcast the notifications update
+        wallet_data = wallet.to_dict()
+        wallet_data['type'] = 'notifications'
+        broadcast_wallet_update(wallet_data)
         
         return jsonify({
             'message': 'Notifications updated successfully',
@@ -408,6 +508,11 @@ def rename_wallet(wallet_address):
         wallet.name = new_name.strip()
         db.session.commit()
         
+        # Broadcast the rename update
+        wallet_data = wallet.to_dict()
+        wallet_data['type'] = 'rename'
+        broadcast_wallet_update(wallet_data)
+        
         return jsonify({
             'message': 'Wallet renamed successfully',
             'wallet': wallet.to_dict()
@@ -416,8 +521,14 @@ def rename_wallet(wallet_address):
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
+    print("Server initialized for threading.")
+    # Initialize database
     with app.app_context():
         init_db()
-    # Get port from environment variable or use 5000 as default
-    port = int(os.environ.get('PORT', 5000))
-    socketio.run(app, host='0.0.0.0', port=port, debug=True)
+    
+    # Start the background update thread
+    update_thread = threading.Thread(target=update_wallet_balances, daemon=True)
+    update_thread.start()
+    
+    # Run the Socket.IO server with minimal configuration
+    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
