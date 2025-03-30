@@ -1,4 +1,5 @@
 Flask==2.0.1
+Werkzeug==2.0.3
 requests==2.26.0
 SQLAlchemy==2.0.28
 flask-sqlalchemy==2.5.1
