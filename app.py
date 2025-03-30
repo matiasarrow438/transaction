@@ -10,13 +10,13 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///wallets.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///wallets.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = 'your-secret-key'  # Required for Flask-SocketIO
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key')
 db = SQLAlchemy(app)
 
-# Initialize SocketIO
-socketio = SocketIO(app)
+# Initialize SocketIO with async mode
+socketio = SocketIO(app, async_mode='eventlet', cors_allowed_origins="*")
 
 # Use Vibestation RPC endpoint with fallbacks
 RPC_ENDPOINTS = [
@@ -530,5 +530,8 @@ if __name__ == '__main__':
     update_thread = threading.Thread(target=update_wallet_balances, daemon=True)
     update_thread.start()
     
-    # Run the Socket.IO server with minimal configuration
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+    # Get port from environment variable for Render compatibility
+    port = int(os.getenv('PORT', 10000))
+    
+    # Run the Socket.IO server
+    socketio.run(app, host='0.0.0.0', port=port, debug=False)
