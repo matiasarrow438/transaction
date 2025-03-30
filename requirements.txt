@@ -1,7 +1,7 @@
 Flask==2.0.1
 Werkzeug==2.0.3
 requests==2.26.0
-SQLAlchemy==2.0.28
+SQLAlchemy==1.4.23
 flask-sqlalchemy==2.5.1
 flask-socketio==5.1.1
 python-socketio==5.4.0
